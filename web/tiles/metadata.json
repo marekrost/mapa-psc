@@ -1,0 +1,34 @@
+{
+  "name": "PSČ ČR",
+  "description": "Odvozené hranice PSČ z RÚIAN adresních bodů",
+  "version": "1.0",
+  "attribution": "Data © RÚIAN, Mapa © Open Source contributors",
+  "type": "overlay",
+  "format": "pbf",
+  "minzoom": 6,
+  "maxzoom": 14,
+  "bounds": [
+    12.0,
+    48.5,
+    18.9,
+    51.1
+  ],
+  "center": [
+    15.3381,
+    49.7437,
+    7
+  ],
+  "vector_layers": [
+    {
+      "id": "zip_codes",
+      "description": "ZIP code polygons",
+      "fields": {
+        "zip_code": "String - ZIP code (5 digits)",
+        "point_count": "Number - Count of address points",
+        "area_km2": "Number - Approximate area in km²",
+        "color_index": "Number - Color index for polygon coloring",
+        "method": "String - Generation method"
+      }
+    }
+  ]
+}
