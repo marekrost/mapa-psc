@@ -44,11 +44,6 @@ data/tiles/*
 !data/tiles/
 !data/tiles/.gitkeep
 
-# Web data files
-web/tiles/*
-!web/tiles/
-!web/tiles/.gitkeep
-
 # IDEs
 .vscode/
 .idea/
