@@ -1,6 +1,8 @@
-# Mapa PSČ ČR - Open Source
+# Interaktivní mapa PSČ ČR
 
-Interaktivní mapa poštovních směrovacích čísel České republiky s hranicemi odvozenými z RÚIAN dat.
+Interaktivní mapa poštovních směrovacích čísel České republiky s hranicemi odvozenými z RÚIAN adresních bodů.
+
+**Živá verze [ZDE](https://mapa-psc.marekrost.cz/)**.
 
 ## O projektu
 
@@ -63,7 +65,7 @@ python -m http.server 8000
 
 ### 5. Deployment
 
-Pipeline automaticky zkopíruje vygenerované dlaždice do `web/tiles/`. Pro produkční nasazení stačí zkopírovat celou složku `web/` na statický hosting.
+Python pipeline automaticky zkopíruje vygenerované dlaždice do `web/tiles/`. Pro nasazení stačí zkopírovat celou složku `web/` na statický hosting.
 
 ```bash
 # Zkopírujte web/ na hosting
@@ -141,12 +143,7 @@ MAX_ZOOM = 14  # Městská detailnost
 
 ## Aktualizace dat
 
-RÚIAN data se aktualizují měsíčně. Pro aktualizaci mapy smažte `data/raw/addresses.csv` a spusťte pipeline znovu - data se automaticky stáhnou:
-
-```bash
-rm data/raw/addresses.csv
-./run_pipeline.sh
-```
+RÚIAN data se aktualizují měsíčně. Pro aktualizaci mapy smažte `data/raw/addresses.csv` a spusťte pipeline znovu s nejnovějším zdrojovým ZIP souborem.
 
 Pipeline je idempotentní a lze ji opakovaně spouštět.
 
