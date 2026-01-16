@@ -8,9 +8,9 @@ Smyslem projektu je poskytnout online mapu příslušnosti k PSČ. PSČ není of
 
 ### Klíčové vlastnosti
 
-- **Zero backend** - statická prezentace hostovatelná bez CGI.
+- **Zero backend** - statická prezentace hostovatelná bez CGI
 - **Vektorové dlaždice** - efektivní zobrazení s MapLibre GL JS
-- **Adaptivní geometrie** - Alpha Shapes s automatickým přizpůsobením hustotě zástavby
+- **Voronoi tessellation** - přirozené hranice mezi sousedícími PSČ bez mezer
 - **Barevné rozdělení pomocí Welsh-Powell algoritmu** - sousedící PSČ mají různé barvy
 - **Konfigurovatelná paleta** - barvy lze jednoduše měnit
 
@@ -47,7 +47,7 @@ Zdrojová data pocházejí z [RÚIAN](https://vdp.cuzk.gov.cz/) (Registr územn�
 ./run_pipeline.sh
 
 # Testovací pipeline s ukázkovými daty (Praha 1):
-./run_test_pipeline.sh
+./run_sample_pipeline.sh
 ```
 
 ### 4. Spuštění webové aplikace
@@ -77,13 +77,12 @@ Všechny parametry jsou konfigurovatelné v `src/config.py`:
 ### Geometrické parametry
 
 ```python
-# Alpha Shapes (adaptivní podle hustoty)
-ALPHA_MIN = 0.01   # Hustá městská zástavba (tight fit)
-ALPHA_MAX = 2.0    # Řídká venkovská zástavba (loose fit)
-ALPHA_DENSITY_THRESHOLD = 100  # bodů/km² pro rozlišení urban/rural
+# Voronoi tessellation
+VORONOI_CLIP_BUFFER_METERS = 500  # Buffer kolem konvexního obalu
+SIMPLIFY_TOLERANCE_METERS = 20    # Douglas-Peucker vyhlazení
 
 # Buffer pro osamocené adresy
-BUFFER_RADIUS_METERS = 750  # Poloměr viditelný na zoom 10, klikatelný na zoom 12
+BUFFER_RADIUS_METERS = 500  # Poloměr pro PSČ s 1-2 adresami
 ```
 
 ### Barevná paleta
@@ -102,9 +101,8 @@ MAX_ZOOM = 14  # Městská detailnost
 ```
 .
 ├── pyproject.toml                  # uv dependencies
-├── requirements.txt                # Prázdný (pro kompatibilitu)
 ├── run_pipeline.sh                 # Spuštění celého ETL pipeline
-├── run_sample_pipeline.sh          # Spuštění celého ETL pipeline nad ukázkovými daty
+├── run_sample_pipeline.sh          # Spuštění ETL pipeline nad ukázkovými daty
 │
 ├── data/
 │   ├── raw/                        # RÚIAN CSV (CP-1250 encoding)
@@ -115,7 +113,7 @@ MAX_ZOOM = 14  # Městská detailnost
 ├── src/
 │   ├── config.py                   # Globální konfigurace
 │   ├── 01_csv2parquet.py           # ETL: Načtení a transformace
-│   ├── 02_parquet2geopkg-poly.py   # ETL: Generování polygonů (Alpha Shapes)
+│   ├── 02_parquet2geopkg-poly.py   # ETL: Generování polygonů (Voronoi)
 │   └── 03_geopkg2geojson-tiles.py  # ETL: Generování MVT dlaždic
 │
 ├── web/
@@ -123,8 +121,7 @@ MAX_ZOOM = 14  # Městská detailnost
 │   ├── app.js                      # MapLibre logika
 │   └── tiles/                      # MVT dlaždice (zkopírováno z data/tiles)
 │
-├── docs/                           # Dokumentace, popis zadání
-└── tests/                          # Testy
+└── docs/                           # Dokumentace, popis zadání
 ```
 
 ## Technologie
@@ -133,7 +130,7 @@ MAX_ZOOM = 14  # Městská detailnost
 - **pandas** - zpracování CSV
 - **geopandas** - geografická data
 - **pyproj** - transformace souřadnic (S-JTSK → WGS84)
-- **alphashape** - konkávní obálky (Alpha Shapes)
+- **scipy.spatial** - Voronoi tessellation
 - **shapely** - geometrické operace
 - **pyarrow** - Parquet I/O
 - **tippecanoe** - generování MVT dlaždic
@@ -144,13 +141,10 @@ MAX_ZOOM = 14  # Městská detailnost
 
 ## Aktualizace dat
 
-RÚIAN data se aktualizují měsíčně. Pro aktualizaci mapy:
-
-1. Stáhněte nový VFR export z [RÚIAN](https://www.cuzk.cz/ruian)
-2. Nahraďte CSV v `data/raw/`
-3. Spusťte kompletní ETL pipeline:
+RÚIAN data se aktualizují měsíčně. Pro aktualizaci mapy smažte `data/raw/addresses.csv` a spusťte pipeline znovu - data se automaticky stáhnou:
 
 ```bash
+rm data/raw/addresses.csv
 ./run_pipeline.sh
 ```
 

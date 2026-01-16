@@ -26,11 +26,9 @@ CRS_TARGET = "EPSG:4326"  # WGS84
 # CSV encoding (RÚIAN uses CP-1250 / Windows-1250)
 CSV_ENCODING = "cp1250"
 
-# Delaunay triangulation parameters (for polygon generation)
-# Triangles with edges longer than threshold are removed, preserving holes and U-shapes
-EDGE_LENGTH_BASE_METERS = 150  # Base edge threshold for dense urban areas
-EDGE_LENGTH_MAX_METERS = 500   # Maximum edge threshold for sparse rural areas
-EDGE_DENSITY_THRESHOLD = 50    # Points per km² - below this, use longer edges
+# Voronoi tessellation parameters
+VORONOI_CLIP_BUFFER_METERS = 500  # Buffer around convex hull for clipping Voronoi cells
+SIMPLIFY_TOLERANCE_METERS = 20    # Douglas-Peucker simplification tolerance
 
 # Fallback for small point counts
 BUFFER_RADIUS_METERS = 500  # Buffer radius for single-point ZIP (visible at zoom 10, clickable at zoom 12)

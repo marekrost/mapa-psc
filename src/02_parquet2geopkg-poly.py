@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """
-ETL Step 2: Polygon Generation
+ETL Step 2: Polygon Generation using Voronoi Tessellation
 - Load processed points from Parquet
-- Generate polygons using Delaunay triangulation with edge filtering
-- Adaptive edge threshold based on point density
-- Preserves holes and complex shapes (donuts, U-shapes)
-- Fallback logic for small point counts
-- Topological validation
+- Generate Voronoi cells for each address point
+- Clip to convex hull boundary with buffer
+- Dissolve cells by ZIP code
+- Simplify with Douglas-Peucker algorithm
 - Greedy algorithm coloring
 - Export to GeoPackage
+
+This approach (similar to Google's method):
+- Fills entire space with no gaps
+- Shows clear neighbor relationships
+- Creates cartographically natural boundaries
 """
 
 import sys
 from pathlib import Path
-from typing import Tuple
 
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point, Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, MultiPolygon, box
 from shapely.ops import unary_union
-from scipy.spatial import Delaunay, ConvexHull
+from scipy.spatial import Voronoi, ConvexHull
 import numpy as np
 
 # Add project root to path for config import
@@ -38,208 +41,215 @@ def load_points(parquet_path: Path) -> pd.DataFrame:
 def meters_to_degrees(meters: float) -> float:
     """
     Convert meters to degrees (approximate for Czech Republic ~50° latitude).
-
-    At latitude 50°:
-    - 1 degree latitude ≈ 111 km
-    - 1 degree longitude ≈ 71 km
-    - Average ≈ 91 km
     """
     return meters / 91000
 
 
-def calculate_adaptive_edge_threshold(points: np.ndarray, point_count: int) -> float:
+def voronoi_finite_polygons(vor, radius=None):
     """
-    Calculate adaptive edge threshold based on point density.
+    Reconstruct infinite Voronoi regions as finite polygons.
 
     Args:
-        points: Array of (lon, lat) coordinates
-        point_count: Number of points
+        vor: scipy.spatial.Voronoi object
+        radius: Distance to extend infinite edges (if None, uses 10x the extent)
 
     Returns:
-        Edge threshold in degrees
+        List of (region_index, polygon) tuples
     """
-    if point_count < 4:
-        return meters_to_degrees(config.EDGE_LENGTH_MAX_METERS)
+    if vor.points.shape[1] != 2:
+        raise ValueError("Requires 2D input")
 
-    try:
-        hull = ConvexHull(points)
-        # Approximate area in degrees squared
-        area_deg2 = hull.volume  # In 2D, volume is area
+    new_regions = []
+    new_vertices = vor.vertices.tolist()
 
-        # Convert to km²
-        area_km2 = area_deg2 * 111 * 71
+    center = vor.points.mean(axis=0)
+    if radius is None:
+        radius = np.ptp(vor.points, axis=0).max() * 10
 
-        # Calculate density (points per km²)
-        density = point_count / area_km2 if area_km2 > 0 else 0
+    # Construct a map of point index to Voronoi region
+    all_ridges = {}
+    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
+        all_ridges.setdefault(p1, []).append((p2, v1, v2))
+        all_ridges.setdefault(p2, []).append((p1, v1, v2))
 
-        # Map density to edge threshold
-        # High density -> shorter edges (tighter fit)
-        # Low density -> longer edges (looser fit)
-        if density > config.EDGE_DENSITY_THRESHOLD:
-            threshold_m = config.EDGE_LENGTH_BASE_METERS
-        elif density < 10:
-            threshold_m = config.EDGE_LENGTH_MAX_METERS
+    # Reconstruct each region
+    for p1, region_idx in enumerate(vor.point_region):
+        vertices = vor.regions[region_idx]
+
+        if all(v >= 0 for v in vertices):
+            # Finite region - use as-is
+            new_regions.append(vertices)
+            continue
+
+        # Infinite region - reconstruct
+        ridges = all_ridges.get(p1, [])
+        new_region = [v for v in vertices if v >= 0]
+
+        for p2, v1, v2 in ridges:
+            if v2 < 0:
+                v1, v2 = v2, v1
+            if v1 >= 0:
+                continue
+
+            # Compute the direction to extend
+            t = vor.points[p2] - vor.points[p1]
+            t = t / np.linalg.norm(t)
+            n = np.array([-t[1], t[0]])  # Normal
+
+            midpoint = vor.points[[p1, p2]].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, n)) * n
+
+            far_point = vor.vertices[v2] + direction * radius
+            new_region.append(len(new_vertices))
+            new_vertices.append(far_point.tolist())
+
+        # Sort region vertices by angle
+        vs = np.asarray([new_vertices[v] for v in new_region])
+        c = vs.mean(axis=0)
+        angles = np.arctan2(vs[:, 1] - c[1], vs[:, 0] - c[0])
+        new_region = np.array(new_region)[np.argsort(angles)].tolist()
+
+        new_regions.append(new_region)
+
+    return new_regions, np.asarray(new_vertices)
+
+
+def generate_voronoi_polygons(df: pd.DataFrame, clip_boundary: Polygon) -> gpd.GeoDataFrame:
+    """
+    Generate Voronoi polygons for all points, clipped to boundary.
+
+    Args:
+        df: DataFrame with lon, lat, zip_code columns
+        clip_boundary: Polygon to clip Voronoi cells to
+
+    Returns:
+        GeoDataFrame with one row per point, containing Voronoi cell geometry
+    """
+    coords = df[['lon', 'lat']].values
+
+    # Handle edge case: very few points
+    if len(coords) < 4:
+        # Just buffer the points
+        geometries = [Point(c).buffer(meters_to_degrees(config.BUFFER_RADIUS_METERS)) for c in coords]
+        return gpd.GeoDataFrame({
+            'zip_code': df['zip_code'].values,
+            'geometry': geometries
+        }, crs=config.CRS_TARGET)
+
+    # Generate Voronoi diagram
+    vor = Voronoi(coords)
+
+    # Get finite polygons
+    regions, vertices = voronoi_finite_polygons(vor)
+
+    # Create polygons and clip to boundary
+    polygons = []
+    for i, region in enumerate(regions):
+        if len(region) < 3:
+            # Invalid region - use buffer
+            poly = Point(coords[i]).buffer(meters_to_degrees(config.BUFFER_RADIUS_METERS))
         else:
-            # Interpolate based on density
-            ratio = density / config.EDGE_DENSITY_THRESHOLD
-            threshold_m = config.EDGE_LENGTH_MAX_METERS - (
-                ratio * (config.EDGE_LENGTH_MAX_METERS - config.EDGE_LENGTH_BASE_METERS)
-            )
+            poly = Polygon([vertices[v] for v in region])
 
-        return meters_to_degrees(threshold_m)
+        # Clip to boundary
+        if clip_boundary is not None:
+            poly = poly.intersection(clip_boundary)
 
-    except Exception as e:
-        print(f"  Warning: Could not calculate adaptive threshold: {e}")
-        return meters_to_degrees(
-            (config.EDGE_LENGTH_BASE_METERS + config.EDGE_LENGTH_MAX_METERS) / 2
-        )
+        # Ensure valid geometry
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+
+        polygons.append(poly)
+
+    return gpd.GeoDataFrame({
+        'zip_code': df['zip_code'].values,
+        'geometry': polygons
+    }, crs=config.CRS_TARGET)
 
 
-def generate_polygon_delaunay(coords: np.ndarray, edge_threshold_deg: float) -> Polygon | MultiPolygon | None:
+def create_clip_boundary(df: pd.DataFrame, buffer_meters: float) -> Polygon:
     """
-    Generate polygon using Delaunay triangulation with edge filtering.
-
-    This method preserves holes and complex shapes (donuts, U-shapes) because
-    triangles spanning empty areas have long edges and are filtered out.
+    Create a clipping boundary from the convex hull of all points with a buffer.
 
     Args:
-        coords: Array of (lon, lat) coordinates
-        edge_threshold_deg: Maximum edge length in degrees
+        df: DataFrame with lon, lat columns
+        buffer_meters: Buffer distance in meters
 
     Returns:
-        Polygon or MultiPolygon geometry, or None if failed
+        Polygon boundary
     """
+    coords = df[['lon', 'lat']].values
+
     if len(coords) < 3:
-        return None
+        # Use bounding box with buffer
+        minx, miny = coords.min(axis=0)
+        maxx, maxy = coords.max(axis=0)
+        buffer_deg = meters_to_degrees(buffer_meters)
+        return box(minx - buffer_deg, miny - buffer_deg,
+                   maxx + buffer_deg, maxy + buffer_deg)
 
-    # Create Delaunay triangulation
-    try:
-        tri = Delaunay(coords)
-    except Exception:
-        return None
+    # Create convex hull
+    hull = ConvexHull(coords)
+    hull_polygon = Polygon(coords[hull.vertices])
 
-    # Filter triangles by edge length
-    triangles = []
-    for simplex in tri.simplices:
-        pts = coords[simplex]
-
-        # Calculate edge lengths
-        edges = [
-            np.linalg.norm(pts[0] - pts[1]),
-            np.linalg.norm(pts[1] - pts[2]),
-            np.linalg.norm(pts[2] - pts[0])
-        ]
-
-        # Keep triangle only if all edges are below threshold
-        if max(edges) <= edge_threshold_deg:
-            triangles.append(Polygon(pts))
-
-    if not triangles:
-        return None
-
-    # Union all triangles into a single geometry
-    return unary_union(triangles)
+    # Add buffer
+    buffer_deg = meters_to_degrees(buffer_meters)
+    return hull_polygon.buffer(buffer_deg)
 
 
-def create_buffer_polygon(point: Tuple[float, float], radius_meters: float) -> Polygon:
+def dissolve_by_zip_code(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Create a circular buffer around a point.
+    Dissolve (merge) Voronoi cells by ZIP code.
 
     Args:
-        point: (lon, lat) tuple
-        radius_meters: Buffer radius in meters
+        gdf: GeoDataFrame with zip_code and geometry columns
 
     Returns:
-        Buffered polygon
+        GeoDataFrame with one row per ZIP code
     """
-    pt = Point(point)
-    buffer_deg = meters_to_degrees(radius_meters)
-    return pt.buffer(buffer_deg)
+    # Group by ZIP code and union geometries
+    dissolved = gdf.dissolve(by='zip_code', as_index=False)
+
+    # Count points per ZIP code
+    point_counts = gdf.groupby('zip_code').size().reset_index(name='point_count')
+    dissolved = dissolved.merge(point_counts, on='zip_code')
+
+    return dissolved
 
 
-def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dict | None:
+def simplify_and_smooth(gdf: gpd.GeoDataFrame, tolerance_meters: float) -> gpd.GeoDataFrame:
     """
-    Generate polygon for a single ZIP code.
+    Simplify geometries using Douglas-Peucker algorithm.
 
     Args:
-        zip_code: ZIP code
-        points_df: DataFrame with points for this ZIP code
+        gdf: GeoDataFrame with geometries
+        tolerance_meters: Simplification tolerance in meters
 
     Returns:
-        Dictionary with polygon geometry and attributes, or None if failed
+        GeoDataFrame with simplified geometries
     """
-    point_count = len(points_df)
-    coords = points_df[['lon', 'lat']].values
+    tolerance_deg = meters_to_degrees(tolerance_meters)
 
-    geometry = None
-    method = None
+    simplified_geometries = []
+    for geom in gdf.geometry:
+        # Douglas-Peucker simplification
+        simplified = geom.simplify(tolerance_deg, preserve_topology=True)
 
-    try:
-        if point_count == 1:
-            # Single point: create buffer
-            geometry = create_buffer_polygon(coords[0], config.BUFFER_RADIUS_METERS)
-            method = 'buffer'
+        # Ensure valid
+        if not simplified.is_valid:
+            simplified = simplified.buffer(0)
 
-        elif point_count == 2:
-            # Two points: create buffered line
-            from shapely.geometry import LineString
-            line = LineString(coords)
-            geometry = line.buffer(meters_to_degrees(config.BUFFER_RADIUS_METERS / 2))
-            method = 'buffered_line'
+        simplified_geometries.append(simplified)
 
-        elif point_count == 3:
-            # Three points: simple triangle
-            geometry = Polygon(coords)
-            method = 'triangle'
-
-        else:
-            # Many points: use Delaunay triangulation with edge filtering
-            edge_threshold = calculate_adaptive_edge_threshold(coords, point_count)
-            geometry = generate_polygon_delaunay(coords, edge_threshold)
-
-            if geometry is not None:
-                method = f'delaunay(e={edge_threshold * 91000:.0f}m)'
-            else:
-                # Fallback to convex hull if Delaunay fails
-                print(f"  ZIP {zip_code}: Delaunay produced no triangles, using convex hull")
-                hull = ConvexHull(coords)
-                hull_points = coords[hull.vertices]
-                geometry = Polygon(hull_points)
-                method = 'convex_hull_fallback'
-
-        # Validate and fix geometry
-        if geometry is not None:
-            if not geometry.is_valid:
-                geometry = geometry.buffer(0)  # Fix self-intersections
-
-            # Calculate area in km²
-            area_deg2 = geometry.area
-            area_km2 = area_deg2 * 111 * 71  # Rough approximation
-
-            return {
-                'zip_code': zip_code,
-                'geometry': geometry,
-                'point_count': point_count,
-                'area_km2': round(area_km2, 2),
-                'method': method,
-            }
-
-    except Exception as e:
-        print(f"  Error processing ZIP code {zip_code}: {e}")
-
-    return None
+    gdf = gdf.copy()
+    gdf['geometry'] = simplified_geometries
+    return gdf
 
 
 def apply_graph_coloring(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Apply Welsh-Powell greedy graph coloring to ensure adjacent polygons
     have different colors.
-
-    Args:
-        gdf: GeoDataFrame with polygon geometries
-
-    Returns:
-        GeoDataFrame with color_index column added
     """
     n = len(gdf)
     print(f"Building adjacency graph for {n} polygons...")
@@ -248,12 +258,17 @@ def apply_graph_coloring(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     spatial_index = gdf.sindex
     adjacency = {i: set() for i in range(n)}
 
-    # Find all geometries that intersect/touch
-    possible_matches = spatial_index.query(gdf.geometry, predicate="intersects")
-
-    for i, j in zip(possible_matches[0], possible_matches[1]):
-        if i != j:
-            adjacency[i].add(j)
+    # Find all geometries that touch (not just intersect - we want shared borders)
+    for i in range(n):
+        geom = gdf.geometry.iloc[i]
+        # Get candidates from spatial index
+        candidates = list(spatial_index.intersection(geom.bounds))
+        for j in candidates:
+            if i != j:
+                other_geom = gdf.geometry.iloc[j]
+                # Check if they actually touch/intersect
+                if geom.touches(other_geom) or geom.intersects(other_geom):
+                    adjacency[i].add(j)
 
     # Welsh-Powell: sort nodes by degree (number of neighbors) descending
     nodes = sorted(range(n), key=lambda x: len(adjacency[x]), reverse=True)
@@ -272,6 +287,7 @@ def apply_graph_coloring(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         colors[node] = color
 
     # Add colors to GeoDataFrame
+    gdf = gdf.copy()
     gdf['color_index'] = [colors[i] for i in range(n)]
 
     max_colors = gdf['color_index'].max() + 1
@@ -285,7 +301,7 @@ def main():
     """Main polygon generation pipeline."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='ETL Step 2: Polygon Generation')
+    parser = argparse.ArgumentParser(description='ETL Step 2: Polygon Generation (Voronoi)')
     parser.add_argument('--input', type=Path, default=config.POINTS_PARQUET,
                         help='Input Parquet file path')
     parser.add_argument('--output', type=Path, default=config.POLYGONS_GPKG,
@@ -293,7 +309,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("ETL Step 2: Polygon Generation")
+    print("ETL Step 2: Polygon Generation (Voronoi Tessellation)")
     print("=" * 60)
 
     # Check if input file exists
@@ -305,48 +321,50 @@ def main():
     # Load points
     df = load_points(args.input)
 
-    # Generate polygons for each ZIP code
-    print(f"\nGenerating polygons for {df['zip_code'].nunique():,} ZIP codes...")
-    print(f"Edge threshold range: {config.EDGE_LENGTH_BASE_METERS}-{config.EDGE_LENGTH_MAX_METERS}m")
-    print(f"Buffer radius: {config.BUFFER_RADIUS_METERS}m")
+    # Create clipping boundary (convex hull + buffer)
+    print(f"\nCreating clip boundary (convex hull + {config.VORONOI_CLIP_BUFFER_METERS}m buffer)...")
+    clip_boundary = create_clip_boundary(df, config.VORONOI_CLIP_BUFFER_METERS)
 
-    polygons = []
-    for i, (zip_code, group) in enumerate(df.groupby('zip_code'), 1):
-        if i % 500 == 0:
-            print(f"  Processing {i}/{df['zip_code'].nunique()}...")
+    # Generate Voronoi cells
+    print("Generating Voronoi cells for all points...")
+    voronoi_gdf = generate_voronoi_polygons(df, clip_boundary)
+    print(f"  Created {len(voronoi_gdf):,} Voronoi cells")
 
-        result = generate_polygon_for_zip_code(zip_code, group)
-        if result:
-            polygons.append(result)
+    # Dissolve by ZIP code
+    print("\nDissolving cells by ZIP code...")
+    dissolved_gdf = dissolve_by_zip_code(voronoi_gdf)
+    print(f"  Merged into {len(dissolved_gdf):,} ZIP code polygons")
 
-    print(f"Generated {len(polygons):,} polygons")
+    # Simplify geometries
+    print(f"\nSimplifying geometries (tolerance: {config.SIMPLIFY_TOLERANCE_METERS}m)...")
+    simplified_gdf = simplify_and_smooth(dissolved_gdf, config.SIMPLIFY_TOLERANCE_METERS)
 
-    # Create GeoDataFrame
-    gdf = gpd.GeoDataFrame(polygons, crs=config.CRS_TARGET)
+    # Calculate areas
+    simplified_gdf['area_km2'] = simplified_gdf.geometry.area * 111 * 71
+    simplified_gdf['area_km2'] = simplified_gdf['area_km2'].round(2)
+
+    # Add method column
+    simplified_gdf['method'] = 'voronoi'
 
     # Apply graph coloring
-    gdf = apply_graph_coloring(gdf)
+    result_gdf = apply_graph_coloring(simplified_gdf)
 
     # Summary statistics
     print("\nSummary:")
-    print(f"  Total polygons: {len(gdf):,}")
-    print(f"  Total points: {gdf['point_count'].sum():,}")
-    print(f"  Average points per ZIP code: {gdf['point_count'].mean():.1f}")
-    print(f"  Median area: {gdf['area_km2'].median():.2f} km²")
-    print(f"  Total area: {gdf['area_km2'].sum():.0f} km²")
-
-    # Method breakdown
-    method_counts = gdf['method'].apply(lambda x: x.split('(')[0]).value_counts()
-    print(f"  Methods: {method_counts.to_dict()}")
+    print(f"  Total polygons: {len(result_gdf):,}")
+    print(f"  Total points: {result_gdf['point_count'].sum():,}")
+    print(f"  Average points per ZIP code: {result_gdf['point_count'].mean():.1f}")
+    print(f"  Median area: {result_gdf['area_km2'].median():.2f} km²")
+    print(f"  Total area: {result_gdf['area_km2'].sum():.0f} km²")
 
     # Export to GeoPackage
     print(f"\nExporting to {args.output}...")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    gdf.to_file(args.output, driver='GPKG', layer='zip_codes')
+    result_gdf.to_file(args.output, driver='GPKG', layer='zip_codes')
 
     file_size_mb = args.output.stat().st_size / 1024 / 1024
-    print(f"Saved {len(gdf):,} polygons ({file_size_mb:.2f} MB)")
+    print(f"Saved {len(result_gdf):,} polygons ({file_size_mb:.2f} MB)")
 
     print("=" * 60)
     print("Step 2 completed successfully!")

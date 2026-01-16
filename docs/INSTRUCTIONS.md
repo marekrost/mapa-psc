@@ -18,21 +18,21 @@ Cílem architektury je nulový backend a možnost hostování na statickém úlo
 ```text
 /
 ├── data/
-│   ├── raw/                        # Vstupní CSV z RÚIAN. CP-1250 / WinLatin 2 encoding.
-│   ├── processed/                  # Body v WGS84
-│   ├── polygons/                   # Surové i sjednocené polygony
-│   └── tiles/                      # Finální vektorové dlaždice {z}/{x}/{y}.pbf
+│   ├── raw/                        # Vstupní CSV z RÚIAN (CP-1250 encoding)
+│   ├── processed/                  # Body v WGS84 (Parquet)
+│   ├── polygons/                   # GeoPackage s polygony
+│   └── tiles/                      # Vektorové dlaždice {z}/{x}/{y}.pbf
 ├── src/
+│   ├── config.py                   # Konfigurace pipeline
 │   ├── 01_csv2parquet.py           # ETL: Čištění a transformace souřadnic
-│   ├── 02_parquet2geopkg-poly.py   # ETL: Geometrie: Generování polygonů
-│   ├── 03_geopkg2geojson-tiles.py  # ETL: Optimalizace: Generování MVT dlaždic
-│   └── config.py
+│   ├── 02_parquet2geopkg-poly.py   # ETL: Voronoi tessellation
+│   └── 03_geopkg2geojson-tiles.py  # ETL: Generování MVT dlaždic
 ├── web/
 │   ├── tiles/                      # MVT dlaždice (zkopírováno z data/tiles)
 │   ├── app.js                      # MapLibre logika
 │   └── index.html                  # Web UI
-├── run_pipeline.sh                 # Spouští Python ETL pipeline
-└── run_sample_pipeline.sh          # Spouští Python ETL pipeline nad Sample daty k ověření procesu
+├── run_pipeline.sh                 # Spouští ETL pipeline (auto-download dat)
+└── run_sample.pipeline.sh          # ETL nad ukázkovými daty
 ```
 
 ---
@@ -42,146 +42,63 @@ Cílem architektury je nulový backend a možnost hostování na statickém úlo
 ### Krok 01: Příprava dat
 
 - **Vstup:** VFR CSV adresních míst z RÚIAN (~3 miliony záznamů)
-- **Filtrace:** Povinné atributy:
-  - `psc`
-  - `x`, `y` (souřadnice)
-  - doporučeno zachovat `id_adresniho_mista` pro auditovatelnost
+- **Transformace souřadnic:** S-JTSK (EPSG:5514) → WGS84 (EPSG:4326) pomocí `pyproj`
+- **Výstup:** `addresses.parquet` se sloupci `zip_code`, `lon`, `lat`
 
-- **Transformace souřadnic:**  
-  - Zdroj: S-JTSK (EPSG:5514)  
-  - Cíl: WGS84 (EPSG:4326)  
-  - Nástroj: `pyproj`
+### Krok 02: Generování polygonů (Voronoi Tessellation)
 
-- **Výstup:**  
-  - `points.parquet`
-  - Sloupce: `psc`, `lon`, `lat`, `id_adresniho_mista`
-  - Formát Parquet zvolen pro:
-    - vysokou kompresi
-    - rychlé filtrování podle PSČ
-    - škálovatelnost
+#### Algoritmus (podobný přístupu Google Maps)
 
-### Krok 02: Generování polygonů (Clustering)
+1. **Voronoi diagram** - každý adresní bod získá buňku obsahující prostor, který je k němu nejblíže
+2. **Clip to boundary** - oříznutí na konvexní obal + buffer
+3. **Dissolve by ZIP** - sloučení buněk se stejným PSČ
+4. **Douglas-Peucker** - vyhlazení hranic
 
-#### Použitý přístup
+#### Výhody Voronoi přístupu
+- Vyplňuje celý prostor (žádné mezery mezi PSČ)
+- Přirozené hranice (equidistantní mezi sousedními adresami)
+- Jasné vztahy mezi sousedícími oblastmi
 
-- Algoritmus: **Delaunay triangulation + edge filtering**
-- Důvod volby:
-  - zachycení reálného rozsahu zástavby
-  - Umožňuje generovat duté a konkávní tvary
+#### Fallback logika
+- 1 bod → kruhový buffer
+- 2-3 body → jednoduchý polygon
 
-#### Logika zpracování
+#### Graph coloring
+- Welsh-Powell greedy algoritmus pro přiřazení barev
+- Sousedící PSČ mají vždy různé barvy
 
-1. Iterace přes **unikátní PSČ**
-2. Pro každé PSČ:
-   - výběr bodového mraku adres
-   - výpočet konkávní obálky
-3. Výsledkem je **jedna geometrie na jedno PSČ**
-   - polygon nebo multipolygon
+- **Výstup:** GeoPackage s atributy `zip_code`, `point_count`, `area_km2`, `color_index`
 
-#### Řízení rizik a okrajové případy
-
-- **Adaptivní parametr alpha**
-  - hodnota se může lišit podle:
-    - počtu bodů
-    - hustoty bodového mraku
-- **Fallback logika:**
-  - 1 bod → kruhový buffer (konfigurovatelný poloměr)
-  - 2–3 body → Convex Hull
-- **Topologická validace:**
-  - oprava self-intersections
-  - odstranění neplatných geometrií (`make_valid`, `buffer(0)`)
-
-#### Atributy polygonu
-
-Každý polygon PSČ musí obsahovat:
-- `psc`
-- `point_count` (počet adresních bodů)
-- volitelně `area_km2` (pro kontrolu extrémů)
-
-- **Výstup:**  
-  - doporučený formát: **GeoPackage**
-
-### Krok 03: Vektorové 
+### Krok 03: Vektorové dlaždice
 
 - **Nástroj:** `tippecanoe`
-- **Vstup:** GeoPackage polygonů PSČ
-- **Výstup:** MVT dlaždice
-
-#### Parametry
-
-- Zoom levels:
-  - min zoom: 6 (přehled republiky)
-  - max zoom: 14 (městská detailnost)
-- Geometrická generalizace:
-  - Douglas-Peucker
-  - rozdílná míra zjednodušení podle zoomu
-
-Doporučené volby:
-- `--detect-shared-borders`
-- `--coalesce-densest-as-needed`
-- `--drop-densest-as-needed`
-- `--no-feature-limit`
-
-- **Výstupní forma:**
-  - rozbalená struktura `{z}/{x}/{y}.pbf`
-  - nebo `.mbtiles` archiv
+- **Zoom levels:** 6 (přehled republiky) – 14 (městská detailnost)
+- **Výstup:** MVT dlaždice `{z}/{x}/{y}.pbf`
 
 ---
 
 ## 3. Webová prezentace (Frontend)
 
-### Mapový stack
-
-- Mapová knihovna: **MapLibre GL JS**
-- Podkladová mapa:
-  - OpenStreetMap (XYZ raster)
-  - možnost budoucí náhrady vektorovým basemapem
-- Vektorový overlay:
-  - zdroj `psc-layer`
-  - URL: `/data/4_tiles/{z}/{x}/{y}.pbf`
-
-### Funkcionalita
-
-- **Interaktivita:**
-  - `click` → identifikace PSČ
-  - `mousemove` → zvýraznění (s throttlingem kvůli výkonu)
-- **Zobrazované atributy:**
-  - PSČ
-  - počet adresních bodů
-  - informační poznámka o odvozené geometrii
-- **Stylování:**
-  - dynamické barvy podle PSČ
-  - transparentní výplň, zvýrazněná hranice
-- **Nulový backend:** Celá složka /data/4_tiles/ a /src/04_web/ je hostována jako statický obsah.
+- **Mapová knihovna:** MapLibre GL JS
+- **Podkladová mapa:** OpenStreetMap (XYZ raster)
+- **Interaktivita:** click/hover pro identifikaci PSČ
+- **Nulový backend:** Celá aplikace je statický obsah
 
 ---
 
 ## 4. Klíčové závislosti
 
 ### Python
-- pandas
-- geopandas
-- pyarrow
-- pyproj
-- alphashape / scipy.spatial
-- shapely
+- pandas, geopandas, pyarrow
+- pyproj, scipy.spatial, shapely
+- tippecanoe (CLI)
 
 ### Frontend
-- maplibre-gl-js
+- MapLibre GL JS
 
 ---
 
-## 5. Aktualizace dat
-
-- Zdroj RÚIAN se aktualizuje pravidelně (měsíčně)
-- ETL pipeline musí být:
-  - idempotentní
-  - spustitelná jedním příkazem
-  - schopná plného přegenerování výstupů
-
----
-
-## 6. Shrnutí omezení
+## 5. Omezení
 
 - Zobrazené hranice PSČ z principu nemohou být oficiální
 - Přesnost závisí na hustotě adresních bodů
