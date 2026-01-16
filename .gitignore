@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# uv
+.uv/
+uv.lock
+
+# Data files (large, generated)
+data/raw/*.csv
+!data/raw/
+!data/raw/.gitkeep
+data/processed/*.parquet
+!data/processed/
+!data/processed/.gitkeep
+data/polygons/*.gpkg
+!data/polygons/
+!data/polygons/.gitkeep
+data/tiles/*
+!data/tiles/
+!data/tiles/.gitkeep
+
+# Web data files
+web/tiles/*
+!web/tiles/
+!web/tiles/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log

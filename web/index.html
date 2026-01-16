@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa PSČ ČR - Open Source</title>
+
+    <!-- MapLibre GL JS -->
+    <link href="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css" rel="stylesheet">
+    <script src="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            max-width: 350px;
+            z-index: 1;
+        }
+
+        .info-panel h1 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .info-panel p {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+
+        .info-panel .details {
+            font-size: 12px;
+            color: #888;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 10px;
+        }
+
+        .info-panel .psc-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .info-panel .psc-info.active {
+            display: block;
+        }
+
+        .info-panel .psc-info strong {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .info-panel .psc-info div {
+            margin-top: 5px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            z-index: 1;
+            font-size: 12px;
+        }
+
+        .legend h3 {
+            font-size: 13px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            border: 1px solid #333;
+            border-radius: 3px;
+        }
+
+        .attribution {
+            position: absolute;
+            bottom: 5px;
+            left: 10px;
+            font-size: 11px;
+            color: #666;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 4px 8px;
+            border-radius: 3px;
+            z-index: 1;
+        }
+
+        .attribution a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .attribution a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            .info-panel {
+                max-width: calc(100vw - 20px);
+                font-size: 12px;
+            }
+
+            .legend {
+                bottom: 60px;
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="info-panel">
+        <h1>Mapa PSČ ČR</h1>
+        <p>
+            Interaktivní mapa poštovních směrovacích čísel České republiky.
+            Klikněte nebo přejeďte myší přes oblast pro zobrazení informací.
+        </p>
+        <div class="psc-info" id="psc-info">
+            <strong id="psc-code">-</strong>
+            <div id="psc-details">-</div>
+        </div>
+        <div class="details">
+            Zobrazené hranice jsou odvozené z bodových dat RÚIAN a slouží výhradně k orientačním a analytickým účelům.
+        </div>
+    </div>
+
+    <div class="legend">
+        <h3>Legenda</h3>
+        <div class="legend-item">
+            <div class="legend-color" id="color-0"></div>
+            <span>Oblasti PSČ</span>
+        </div>
+        <div style="margin-top: 8px; font-size: 11px; color: #888;">
+            Barvy rozlišují sousedící oblasti podle hladového Welsh-Powell algoritmu.
+        </div>
+    </div>
+
+    <div class="attribution">
+        Data © <a href="https://www.cuzk.cz/" target="_blank" rel="noopener">RÚIAN</a> |
+        Mapa © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

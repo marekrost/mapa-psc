@@ -1,0 +1,3 @@
+# This project uses uv for dependency management.
+# See pyproject.toml for actual dependencies.
+# This file exists for compatibility with legacy tools.
