@@ -4,12 +4,14 @@ const CONFIG = {
     mapZoom: 7,
     tilesUrl: window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '') + '/tiles/{z}/{x}/{y}.pbf',
 
-    // Four-color palette (configurable - match config.py)
+    // Color palette (configurable - match config.py)
     colorPalette: [
         'rgb(255, 107, 107)',  // Red
         'rgb(78, 205, 196)',   // Teal
         'rgb(255, 195, 113)',  // Orange
         'rgb(162, 155, 254)',  // Purple
+        'rgb(129, 199, 132)',  // Green
+        'rgb(255, 183, 197)',  // Pink
     ]
 };
 
@@ -29,7 +31,7 @@ const map = new maplibregl.Map({
                 tileSize: 256,
                 attribution: '© OpenStreetMap contributors'
             },
-            'psc': {
+            'zip_codes': {
                 type: 'vector',
                 tiles: [CONFIG.tilesUrl],
                 minzoom: 6,
@@ -54,16 +56,16 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
 // Track hover state
-let hoveredPscId = null;
+let hoveredZipId = null;
 
 // Wait for map to load
 map.on('load', () => {
-    // Add PSČ polygon layer with four-color styling
+    // Add ZIP code polygon fill layer
     map.addLayer({
-        id: 'psc-fills',
+        id: 'zip-fills',
         type: 'fill',
-        source: 'psc',
-        'source-layer': 'psc',
+        source: 'zip_codes',
+        'source-layer': 'zip_codes',
         paint: {
             'fill-color': [
                 'case',
@@ -71,6 +73,8 @@ map.on('load', () => {
                 ['==', ['get', 'color_index'], 1], CONFIG.colorPalette[1],
                 ['==', ['get', 'color_index'], 2], CONFIG.colorPalette[2],
                 ['==', ['get', 'color_index'], 3], CONFIG.colorPalette[3],
+                ['==', ['get', 'color_index'], 4], CONFIG.colorPalette[4],
+                ['==', ['get', 'color_index'], 5], CONFIG.colorPalette[5],
                 CONFIG.colorPalette[0]  // Default
             ],
             'fill-opacity': [
@@ -82,12 +86,12 @@ map.on('load', () => {
         }
     });
 
-    // Add PSČ border layer
+    // Add ZIP code border layer
     map.addLayer({
-        id: 'psc-borders',
+        id: 'zip-borders',
         type: 'line',
-        source: 'psc',
-        'source-layer': 'psc',
+        source: 'zip_codes',
+        'source-layer': 'zip_codes',
         paint: {
             'line-color': [
                 'case',
@@ -110,7 +114,7 @@ map.on('load', () => {
 
     // Mouse move handler (with throttling for performance)
     let throttleTimeout = null;
-    map.on('mousemove', 'psc-fills', (e) => {
+    map.on('mousemove', 'zip-fills', (e) => {
         if (throttleTimeout) return;
 
         throttleTimeout = setTimeout(() => {
@@ -119,16 +123,16 @@ map.on('load', () => {
 
         if (e.features.length > 0) {
             // Update hover state
-            if (hoveredPscId !== null) {
+            if (hoveredZipId !== null) {
                 map.setFeatureState(
-                    { source: 'psc', sourceLayer: 'psc', id: hoveredPscId },
+                    { source: 'zip_codes', sourceLayer: 'zip_codes', id: hoveredZipId },
                     { hover: false }
                 );
             }
 
-            hoveredPscId = e.features[0].id;
+            hoveredZipId = e.features[0].id;
             map.setFeatureState(
-                { source: 'psc', sourceLayer: 'psc', id: hoveredPscId },
+                { source: 'zip_codes', sourceLayer: 'zip_codes', id: hoveredZipId },
                 { hover: true }
             );
 
@@ -141,19 +145,19 @@ map.on('load', () => {
     });
 
     // Mouse leave handler
-    map.on('mouseleave', 'psc-fills', () => {
-        if (hoveredPscId !== null) {
+    map.on('mouseleave', 'zip-fills', () => {
+        if (hoveredZipId !== null) {
             map.setFeatureState(
-                { source: 'psc', sourceLayer: 'psc', id: hoveredPscId },
+                { source: 'zip_codes', sourceLayer: 'zip_codes', id: hoveredZipId },
                 { hover: false }
             );
         }
-        hoveredPscId = null;
+        hoveredZipId = null;
         map.getCanvas().style.cursor = '';
     });
 
     // Click handler
-    map.on('click', 'psc-fills', (e) => {
+    map.on('click', 'zip-fills', (e) => {
         if (e.features.length > 0) {
             const props = e.features[0].properties;
 
@@ -176,17 +180,17 @@ map.on('load', () => {
     console.log('Map loaded successfully');
 });
 
-// Update info panel with PSČ details
+// Update info panel with ZIP code details
 function updateInfoPanel(properties, clicked = false) {
-    const infoDiv = document.getElementById('psc-info');
-    const codeEl = document.getElementById('psc-code');
-    const detailsEl = document.getElementById('psc-details');
+    const infoDiv = document.getElementById('zip-info');
+    const codeEl = document.getElementById('zip-code-display');
+    const detailsEl = document.getElementById('zip-details');
 
     infoDiv.classList.add('active');
 
-    // Format PSČ with space (e.g., "123 45")
-    const pscFormatted = properties.psc.replace(/(\d{3})(\d{2})/, '$1 $2');
-    codeEl.textContent = `PSČ ${pscFormatted}`;
+    // Format ZIP code with space (e.g., "123 45")
+    const zipCodeFormatted = properties.zip_code.replace(/(\d{3})(\d{2})/, '$1 $2');
+    codeEl.textContent = `PSČ ${zipCodeFormatted}`;
 
     // Build details
     const details = [];
@@ -214,7 +218,7 @@ function updateInfoPanel(properties, clicked = false) {
             methodText = 'Konkávní obal (Alpha Shape)';
         }
 
-        details.push(`🔧 Metoda: ${methodText}`);
+        details.push(`Metoda: ${methodText}`);
     }
 
     detailsEl.innerHTML = details.join('<br>');
@@ -230,7 +234,7 @@ map.on('error', (e) => {
         (e.error && e.error.message && e.error.message.includes('404')) ||
         (e.error && e.error.message && e.error.message.includes('File not found'));
 
-    if (is404Error && e.sourceId === 'psc') {
+    if (is404Error && e.sourceId === 'zip_codes') {
         if (!tile404WarningShown) {
             console.log('ℹ️ Some tiles return 404 - this is normal for sparse datasets (only tiles with data are generated)');
             tile404WarningShown = true;
@@ -244,28 +248,30 @@ map.on('error', (e) => {
 
 // Log when tiles are loaded
 map.on('data', (e) => {
-    if (e.sourceId === 'psc' && e.isSourceLoaded) {
-        console.log('PSČ tiles loaded');
+    if (e.sourceId === 'zip_codes' && e.isSourceLoaded) {
+        console.log('ZIP code tiles loaded.');
     }
 });
 
 // Allow palette customization via console
 window.updateColorPalette = (colors) => {
-    if (!Array.isArray(colors) || colors.length !== 4) {
-        console.error('Palette must be an array of 4 RGB color strings');
-        console.log('Example: updateColorPalette(["rgb(255,0,0)", "rgb(0,255,0)", "rgb(0,0,255)", "rgb(255,255,0)"])');
+    if (!Array.isArray(colors) || colors.length !== 6) {
+        console.error('Palette must be an array of 6 RGB color strings');
+        console.log('Example: updateColorPalette(["rgb(255,0,0)", "rgb(0,255,0)", "rgb(0,0,255)", "rgb(255,255,0)", "rgb(255,0,255)", "rgb(0,255,255)"])');
         return;
     }
 
     CONFIG.colorPalette = colors;
 
     // Update map layer
-    map.setPaintProperty('psc-fills', 'fill-color', [
+    map.setPaintProperty('zip-fills', 'fill-color', [
         'case',
         ['==', ['get', 'color_index'], 0], colors[0],
         ['==', ['get', 'color_index'], 1], colors[1],
         ['==', ['get', 'color_index'], 2], colors[2],
         ['==', ['get', 'color_index'], 3], colors[3],
+        ['==', ['get', 'color_index'], 4], colors[4],
+        ['==', ['get', 'color_index'], 5], colors[5],
         colors[0]
     ]);
 
@@ -275,4 +281,4 @@ window.updateColorPalette = (colors) => {
     console.log('Color palette updated!');
 };
 
-console.log('Mapa PSČ loaded. Use updateColorPalette(["color1", "color2", "color3", "color4"]) to customize colors.');
+console.log('ZIP code map loaded. Use updateColorPalette([...6 colors...]) to customize colors.');

@@ -60,7 +60,7 @@ def filter_and_validate(df: pd.DataFrame) -> pd.DataFrame:
     # RÚIAN VFR CSV structure:
     # Expected columns (by position in standard RÚIAN format):
     # 0: Kód ADM (ID)
-    # 15: PSČ
+    # 15: PSČ (ZIP)
     # 16: Souřadnice Y
     # 17: Souřadnice X
 
@@ -68,19 +68,19 @@ def filter_and_validate(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = df.columns.str.strip()
     cols_lower = [col.lower() for col in df.columns]
 
-    # Try to find PSČ column by pattern
-    psc_col = None
+    # Try to find ZIP column by pattern
+    zip_col = None
     for i, col in enumerate(cols_lower):
         # Look for 'psc' or 'ps' followed by special char (encoding issues)
         if 'psc' in col or (col.startswith('ps') and len(col) <= 4):
-            psc_col = df.columns[i]
-            print(f"Found PSČ column: '{psc_col}' at position {i}")
+            zip_col = df.columns[i]
+            print(f"Found ZIP column: '{zip_col}' at position {i}")
             break
 
     # Fallback to known position if pattern matching fails
-    if psc_col is None and len(df.columns) > 15:
-        psc_col = df.columns[15]
-        print(f"Using position-based PSČ column: '{psc_col}' at position 15")
+    if zip_col is None and len(df.columns) > 15:
+        zip_col = df.columns[15]
+        print(f"Using position-based ZIP column: '{zip_col}' at position 15")
 
     # Try to find Y coordinate column
     y_col = None
@@ -130,10 +130,10 @@ def filter_and_validate(df: pd.DataFrame) -> pd.DataFrame:
         print(f"Using position-based ID column: '{id_col}' at position 0")
 
     # Validate we found all required columns
-    if not all([psc_col, x_col, y_col]):
+    if not all([zip_col, x_col, y_col]):
         raise ValueError(
             f"Could not find required columns.\n"
-            f"PSČ: {psc_col}\n"
+            f"ZIP: {zip_col}\n"
             f"X: {x_col}\n"
             f"Y: {y_col}\n"
             f"Available columns: {df.columns.tolist()}"
@@ -141,7 +141,7 @@ def filter_and_validate(df: pd.DataFrame) -> pd.DataFrame:
 
     # Rename to standard names
     rename_map = {
-        psc_col: 'psc',
+        zip_col: 'zip_code',
         x_col: 'x',
         y_col: 'y',
     }
@@ -151,27 +151,27 @@ def filter_and_validate(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=rename_map)
 
     # Keep only necessary columns
-    keep_cols = ['psc', 'x', 'y']
+    keep_cols = ['zip_code', 'x', 'y']
     if 'id_adresniho_mista' in df.columns:
         keep_cols.append('id_adresniho_mista')
 
     df = df[keep_cols].copy()
 
     # Remove rows with missing values
-    df = df.dropna(subset=['psc', 'x', 'y'])
+    df = df.dropna(subset=['zip_code', 'x', 'y'])
 
     # Remove invalid coordinates (zeros or obviously wrong values)
     df = df[(df['x'] != 0) & (df['y'] != 0)]
 
-    # Clean PSČ - remove spaces and ensure 5 digits
-    df['psc'] = df['psc'].astype(str).str.replace(' ', '').str.strip()
+    # Clean ZIP - remove spaces and ensure 5 digits
+    df['zip_code'] = df['zip_code'].astype(str).str.replace(' ', '').str.strip()
 
-    # Filter to valid 5-digit PSČ
-    valid_psc_mask = df['psc'].str.match(r'^\d{5}$', na=False)
-    df = df[valid_psc_mask]
+    # Filter to valid 5-digit ZIP
+    valid_zip_mask = df['zip_code'].str.match(r'^\d{5}$', na=False)
+    df = df[valid_zip_mask]
 
     print(f"Filtered: {initial_count:,} -> {len(df):,} rows ({len(df)/initial_count*100:.1f}%)")
-    print(f"Unique PSČ: {df['psc'].nunique():,}")
+    print(f"Unique ZIP: {df['zip_code'].nunique():,}")
 
     return df
 

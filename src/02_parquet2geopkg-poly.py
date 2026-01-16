@@ -2,11 +2,11 @@
 """
 ETL Step 2: Polygon Generation
 - Load processed points from Parquet
-- Generate concave hull (Alpha Shapes) for each PSČ
+- Generate concave hull (Alpha Shapes) for each ZIP code
 - Adaptive alpha based on point density
 - Fallback logic for small point counts
 - Topological validation
-- Four-color theorem coloring
+- Greedy algorithm coloring
 - Export to GeoPackage
 """
 
@@ -30,7 +30,7 @@ def load_points(parquet_path: Path) -> pd.DataFrame:
     """Load processed points from Parquet."""
     print(f"Loading points from {parquet_path}...")
     df = pd.read_parquet(parquet_path)
-    print(f"Loaded {len(df):,} points for {df['psc'].nunique():,} unique PSČ")
+    print(f"Loaded {len(df):,} points for {df['zip_code'].nunique():,} unique ZIP code")
     return df
 
 
@@ -109,13 +109,13 @@ def create_buffer_polygon(point: Tuple[float, float], radius_meters: float) -> P
     return pt.buffer(buffer_deg)
 
 
-def generate_polygon_for_psc(psc: str, points_df: pd.DataFrame) -> dict:
+def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dict:
     """
-    Generate polygon for a single PSČ.
+    Generate polygon for a single ZIP.
 
     Args:
-        psc: PSČ code
-        points_df: DataFrame with points for this PSČ
+        zip_code: ZIP code
+        points_df: DataFrame with points for this ZIP code
 
     Returns:
         Dictionary with polygon geometry and attributes
@@ -154,7 +154,7 @@ def generate_polygon_for_psc(psc: str, points_df: pd.DataFrame) -> dict:
                     raise ValueError("Alpha shape did not produce polygon")
 
             except Exception as e:
-                print(f"  PSČ {psc}: Alpha shape failed ({e}), using convex hull")
+                print(f"  ZIP code {zip_code}: Alpha shape failed ({e}), using convex hull")
                 from scipy.spatial import ConvexHull
                 hull = ConvexHull(coords)
                 hull_points = coords[hull.vertices]
@@ -171,7 +171,7 @@ def generate_polygon_for_psc(psc: str, points_df: pd.DataFrame) -> dict:
             area_km2 = area_deg2 * 111 * 71  # Rough approximation
 
             return {
-                'psc': psc,
+                'zip_code': zip_code,
                 'geometry': geometry,
                 'point_count': point_count,
                 'area_km2': round(area_km2, 2),
@@ -179,7 +179,7 @@ def generate_polygon_for_psc(psc: str, points_df: pd.DataFrame) -> dict:
             }
 
     except Exception as e:
-        print(f"  Error processing PSČ {psc}: {e}")
+        print(f"  Error processing ZIP code {zip_code}: {e}")
 
     return None
 
@@ -224,7 +224,7 @@ def apply_color_theorem(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     max_colors = gdf['color_index'].max() + 1
     print(f"Coloring complete using {max_colors} colors.")
-    print(f"Distribution: {gdf['color_index'].value_counts().to_dict()}")
+    print(f"Color distribution: {gdf['color_index'].value_counts().to_dict()}")
 
     return gdf
 
@@ -253,17 +253,17 @@ def main():
     # Load points
     df = load_points(args.input)
 
-    # Generate polygons for each PSČ
-    print(f"\nGenerating polygons for {df['psc'].nunique():,} PSČ...")
+    # Generate polygons for each ZIP code
+    print(f"\nGenerating polygons for {df['zip_code'].nunique():,} ZIP code...")
     print(f"Adaptive alpha range: {config.ALPHA_MIN} - {config.ALPHA_MAX}")
     print(f"Buffer radius: {config.BUFFER_RADIUS_METERS}m")
 
     polygons = []
-    for i, (psc, group) in enumerate(df.groupby('psc'), 1):
+    for i, (zip_code, group) in enumerate(df.groupby('zip_code'), 1):
         if i % 500 == 0:
-            print(f"  Processing {i}/{df['psc'].nunique()}...")
+            print(f"  Processing {i}/{df['zip_code'].nunique()}...")
 
-        result = generate_polygon_for_psc(psc, group)
+        result = generate_polygon_for_zip_code(zip_code, group)
         if result:
             polygons.append(result)
 
@@ -272,14 +272,14 @@ def main():
     # Create GeoDataFrame
     gdf = gpd.GeoDataFrame(polygons, crs=config.CRS_TARGET)
 
-    # Apply four-color theorem
+    # Apply graph coloring (Welsh-Powell greedy algorithm)
     gdf = apply_color_theorem(gdf)
 
     # Summary statistics
     print("\nSummary:")
     print(f"  Total polygons: {len(gdf):,}")
     print(f"  Total points: {gdf['point_count'].sum():,}")
-    print(f"  Average points per PSČ: {gdf['point_count'].mean():.1f}")
+    print(f"  Average points per ZIP code: {gdf['point_count'].mean():.1f}")
     print(f"  Median area: {gdf['area_km2'].median():.2f} km²")
     print(f"  Total area: {gdf['area_km2'].sum():.0f} km²")
 
@@ -287,7 +287,7 @@ def main():
     print(f"\nExporting to {args.output}...")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    gdf.to_file(args.output, driver='GPKG', layer='psc_polygons')
+    gdf.to_file(args.output, driver='GPKG', layer='zip_codes')
 
     file_size_mb = args.output.stat().st_size / 1024 / 1024
     print(f"Saved {len(gdf):,} polygons ({file_size_mb:.2f} MB)")

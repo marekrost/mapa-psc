@@ -88,27 +88,7 @@ BUFFER_RADIUS_METERS = 750  # Poloměr viditelný na zoom 10, klikatelný na zoo
 
 ### Barevná paleta
 
-```python
-# Four-color theorem palette (RGB tuple)
-COLOR_PALETTE = [
-    (255, 107, 107),  # Červená
-    (78, 205, 196),   # Tyrkysová
-    (255, 195, 113),  # Oranžová
-    (162, 155, 254),  # Fialová
-]
-```
-
-Barvy lze měnit i v prohlížeči:
-
-```javascript
-// V konzoli prohlížeče:
-updateColorPalette([
-    "rgb(255, 0, 0)",
-    "rgb(0, 255, 0)",
-    "rgb(0, 0, 255)",
-    "rgb(255, 255, 0)"
-]);
-```
+Barevná paleta jde nastavit v python konfiguraci pomocí `COLOR_PALETTE` i úpravou v JS přes `updateColorPalette()`.
 
 ### Zoom levels
 

@@ -1,5 +1,5 @@
 """
-Global configuration for PSČ Map ETL pipeline
+Global configuration for ZIP Map ETL pipeline
 """
 
 from pathlib import Path
@@ -9,15 +9,15 @@ PROJECT_ROOT = Path(__file__).parent
 
 # Data paths
 DATA_DIR = PROJECT_ROOT / "data"
-RAW_DATA_DIR = DATA_DIR / "1_raw"
-PROCESSED_DATA_DIR = DATA_DIR / "2_processed"
-POLYGONS_DIR = DATA_DIR / "3_polygons"
-TILES_DIR = DATA_DIR / "4_tiles"
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
+POLYGONS_DIR = DATA_DIR / "polygons"
+TILES_DIR = DATA_DIR / "tiles"
 
 # Input/Output files
-INPUT_CSV = RAW_DATA_DIR / "adresy.csv"  # Adjust filename as needed
-POINTS_PARQUET = PROCESSED_DATA_DIR / "points.parquet"
-POLYGONS_GPKG = POLYGONS_DIR / "psc_polygons.gpkg"
+INPUT_CSV = RAW_DATA_DIR / "addresses.csv"  # Adjust filename as needed
+POINTS_PARQUET = PROCESSED_DATA_DIR / "addresses.parquet"
+POLYGONS_GPKG = POLYGONS_DIR / "addresses.gpkg"
 
 # Coordinate Reference Systems
 CRS_SOURCE = "EPSG:5514"  # S-JTSK
@@ -32,7 +32,7 @@ ALPHA_MAX = 2.0   # Maximum alpha (loose fit for sparse rural areas)
 ALPHA_DENSITY_THRESHOLD = 100  # Points per km² threshold for adaptive alpha
 
 # Fallback for small point counts
-BUFFER_RADIUS_METERS = 750  # Buffer radius for single-point PSČ (visible at zoom 10, clickable at zoom 12)
+BUFFER_RADIUS_METERS = 500  # Buffer radius for single-point ZIP (visible at zoom 10, clickable at zoom 12)
 
 # Tippecanoe parameters
 MIN_ZOOM = 6   # Republic overview
@@ -46,13 +46,15 @@ TIPPECANOE_OPTIONS = [
     "--force",  # Overwrite existing tiles
 ]
 
-# Four-color theorem palette (configurable RGB tuples)
-# These colors will be used to ensure neighboring PSČ have different colors
+# Color palette for polygon coloring (configurable RGB tuples)
+# Welsh-Powell greedy algorithm assigns colors so neighbors differ
 COLOR_PALETTE = [
     (255, 107, 107),  # Red
     (78, 205, 196),   # Teal
     (255, 195, 113),  # Orange
     (162, 155, 254),  # Purple
+    (129, 199, 132),  # Green
+    (255, 183, 197),  # Pink
 ]
 
 # Web map configuration

@@ -74,7 +74,7 @@ def generate_tiles(geojson_path: Path, output_dir: Path):
         f'--output-to-directory={output_dir}',
         f'--minimum-zoom={config.MIN_ZOOM}',
         f'--maximum-zoom={config.MAX_ZOOM}',
-        '--layer=psc',  # Layer name
+        '--layer=zip_codes',  # Layer name
         '--attribution=Data © RÚIAN',
     ]
 
@@ -138,13 +138,13 @@ def create_metadata(output_dir: Path):
         "center": [15.3381, 49.7437, 7],  # [lon, lat, zoom]
         "vector_layers": [
             {
-                "id": "psc",
-                "description": "PSČ polygons",
+                "id": "zip_codes",
+                "description": "ZIP code polygons",
                 "fields": {
-                    "psc": "String - PSČ code (5 digits)",
+                    "zip_code": "String - ZIP code (5 digits)",
                     "point_count": "Number - Count of address points",
                     "area_km2": "Number - Approximate area in km²",
-                    "color_index": "Number - Color index (0-3) for four-color theorem",
+                    "color_index": "Number - Color index for polygon coloring",
                     "method": "String - Generation method",
                 }
             }
@@ -185,7 +185,7 @@ def main():
         sys.exit(1)
 
     # Create temporary GeoJSON
-    temp_geojson = args.input.parent / 'psc_polygons.geojson'
+    temp_geojson = args.input.parent / 'zip_codes.geojson'
 
     # Convert to GeoJSON
     convert_to_geojson(args.input, temp_geojson)

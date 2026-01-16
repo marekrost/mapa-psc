@@ -26,10 +26,6 @@ ENV/
 env/
 .venv
 
-# uv
-.uv/
-uv.lock
-
 # Data files (large, generated)
 data/raw/*.csv
 !data/raw/
