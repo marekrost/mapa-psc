@@ -26,10 +26,11 @@ CRS_TARGET = "EPSG:4326"  # WGS84
 # CSV encoding (RÚIAN uses CP-1250 / Windows-1250)
 CSV_ENCODING = "cp1250"
 
-# Alpha Shapes parameters
-ALPHA_MIN = 0.01  # Minimum alpha (tight fit for dense urban areas)
-ALPHA_MAX = 2.0   # Maximum alpha (loose fit for sparse rural areas)
-ALPHA_DENSITY_THRESHOLD = 100  # Points per km² threshold for adaptive alpha
+# Delaunay triangulation parameters (for polygon generation)
+# Triangles with edges longer than threshold are removed, preserving holes and U-shapes
+EDGE_LENGTH_BASE_METERS = 150  # Base edge threshold for dense urban areas
+EDGE_LENGTH_MAX_METERS = 500   # Maximum edge threshold for sparse rural areas
+EDGE_DENSITY_THRESHOLD = 50    # Points per km² - below this, use longer edges
 
 # Fallback for small point counts
 BUFFER_RADIUS_METERS = 500  # Buffer radius for single-point ZIP (visible at zoom 10, clickable at zoom 12)

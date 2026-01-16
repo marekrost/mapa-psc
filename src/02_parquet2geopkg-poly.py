@@ -2,8 +2,9 @@
 """
 ETL Step 2: Polygon Generation
 - Load processed points from Parquet
-- Generate concave hull (Alpha Shapes) for each ZIP code
-- Adaptive alpha based on point density
+- Generate polygons using Delaunay triangulation with edge filtering
+- Adaptive edge threshold based on point density
+- Preserves holes and complex shapes (donuts, U-shapes)
 - Fallback logic for small point counts
 - Topological validation
 - Greedy algorithm coloring
@@ -12,13 +13,13 @@ ETL Step 2: Polygon Generation
 
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import Tuple
 
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely.ops import unary_union
-import alphashape
+from scipy.spatial import Delaunay, ConvexHull
 import numpy as np
 
 # Add project root to path for config import
@@ -30,61 +31,114 @@ def load_points(parquet_path: Path) -> pd.DataFrame:
     """Load processed points from Parquet."""
     print(f"Loading points from {parquet_path}...")
     df = pd.read_parquet(parquet_path)
-    print(f"Loaded {len(df):,} points for {df['zip_code'].nunique():,} unique ZIP code")
+    print(f"Loaded {len(df):,} points for {df['zip_code'].nunique():,} unique ZIP codes")
     return df
 
 
-def calculate_adaptive_alpha(points: np.ndarray, point_count: int) -> float:
+def meters_to_degrees(meters: float) -> float:
     """
-    Calculate adaptive alpha based on point density.
+    Convert meters to degrees (approximate for Czech Republic ~50° latitude).
+
+    At latitude 50°:
+    - 1 degree latitude ≈ 111 km
+    - 1 degree longitude ≈ 71 km
+    - Average ≈ 91 km
+    """
+    return meters / 91000
+
+
+def calculate_adaptive_edge_threshold(points: np.ndarray, point_count: int) -> float:
+    """
+    Calculate adaptive edge threshold based on point density.
 
     Args:
         points: Array of (lon, lat) coordinates
         point_count: Number of points
 
     Returns:
-        Optimal alpha value
+        Edge threshold in degrees
     """
     if point_count < 4:
-        return 0  # Will use fallback logic
+        return meters_to_degrees(config.EDGE_LENGTH_MAX_METERS)
 
-    # Calculate approximate area using convex hull
-    from scipy.spatial import ConvexHull
     try:
         hull = ConvexHull(points)
         # Approximate area in degrees squared
         area_deg2 = hull.volume  # In 2D, volume is area
 
-        # Convert to km² (rough approximation for Czech Republic latitude ~50°)
-        # 1 degree latitude ≈ 111 km
-        # 1 degree longitude at 50° ≈ 71 km
+        # Convert to km²
         area_km2 = area_deg2 * 111 * 71
 
-        # Calculate density
+        # Calculate density (points per km²)
         density = point_count / area_km2 if area_km2 > 0 else 0
 
-        # Map density to alpha
-        # High density (urban) -> low alpha (tight fit)
-        # Low density (rural) -> high alpha (loose fit)
-        if density > config.ALPHA_DENSITY_THRESHOLD:
-            # Urban area
-            alpha = config.ALPHA_MIN
+        # Map density to edge threshold
+        # High density -> shorter edges (tighter fit)
+        # Low density -> longer edges (looser fit)
+        if density > config.EDGE_DENSITY_THRESHOLD:
+            threshold_m = config.EDGE_LENGTH_BASE_METERS
         elif density < 10:
-            # Very sparse rural
-            alpha = config.ALPHA_MAX
+            threshold_m = config.EDGE_LENGTH_MAX_METERS
         else:
-            # Interpolate logarithmically
-            log_density = np.log10(density + 1)
-            log_threshold = np.log10(config.ALPHA_DENSITY_THRESHOLD)
-            ratio = log_density / log_threshold
-            alpha = config.ALPHA_MAX - (ratio * (config.ALPHA_MAX - config.ALPHA_MIN))
-            alpha = np.clip(alpha, config.ALPHA_MIN, config.ALPHA_MAX)
+            # Interpolate based on density
+            ratio = density / config.EDGE_DENSITY_THRESHOLD
+            threshold_m = config.EDGE_LENGTH_MAX_METERS - (
+                ratio * (config.EDGE_LENGTH_MAX_METERS - config.EDGE_LENGTH_BASE_METERS)
+            )
 
-        return alpha
+        return meters_to_degrees(threshold_m)
 
     except Exception as e:
-        print(f"  Warning: Could not calculate adaptive alpha: {e}")
-        return (config.ALPHA_MIN + config.ALPHA_MAX) / 2
+        print(f"  Warning: Could not calculate adaptive threshold: {e}")
+        return meters_to_degrees(
+            (config.EDGE_LENGTH_BASE_METERS + config.EDGE_LENGTH_MAX_METERS) / 2
+        )
+
+
+def generate_polygon_delaunay(coords: np.ndarray, edge_threshold_deg: float) -> Polygon | MultiPolygon | None:
+    """
+    Generate polygon using Delaunay triangulation with edge filtering.
+
+    This method preserves holes and complex shapes (donuts, U-shapes) because
+    triangles spanning empty areas have long edges and are filtered out.
+
+    Args:
+        coords: Array of (lon, lat) coordinates
+        edge_threshold_deg: Maximum edge length in degrees
+
+    Returns:
+        Polygon or MultiPolygon geometry, or None if failed
+    """
+    if len(coords) < 3:
+        return None
+
+    # Create Delaunay triangulation
+    try:
+        tri = Delaunay(coords)
+    except Exception:
+        return None
+
+    # Filter triangles by edge length
+    triangles = []
+    for simplex in tri.simplices:
+        pts = coords[simplex]
+
+        # Calculate edge lengths
+        edges = [
+            np.linalg.norm(pts[0] - pts[1]),
+            np.linalg.norm(pts[1] - pts[2]),
+            np.linalg.norm(pts[2] - pts[0])
+        ]
+
+        # Keep triangle only if all edges are below threshold
+        if max(edges) <= edge_threshold_deg:
+            triangles.append(Polygon(pts))
+
+    if not triangles:
+        return None
+
+    # Union all triangles into a single geometry
+    return unary_union(triangles)
 
 
 def create_buffer_polygon(point: Tuple[float, float], radius_meters: float) -> Polygon:
@@ -98,27 +152,21 @@ def create_buffer_polygon(point: Tuple[float, float], radius_meters: float) -> P
     Returns:
         Buffered polygon
     """
-    # Convert meters to degrees (rough approximation)
-    # At latitude 50°, 1 degree lat ≈ 111 km, 1 degree lon ≈ 71 km
-    lat_deg = radius_meters / 111000
-    lon_deg = radius_meters / 71000
-
     pt = Point(point)
-    # Use average of lat/lon degrees for circular buffer
-    buffer_deg = (lat_deg + lon_deg) / 2
+    buffer_deg = meters_to_degrees(radius_meters)
     return pt.buffer(buffer_deg)
 
 
-def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dict:
+def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dict | None:
     """
-    Generate polygon for a single ZIP.
+    Generate polygon for a single ZIP code.
 
     Args:
         zip_code: ZIP code
         points_df: DataFrame with points for this ZIP code
 
     Returns:
-        Dictionary with polygon geometry and attributes
+        Dictionary with polygon geometry and attributes, or None if failed
     """
     point_count = len(points_df)
     coords = points_df[['lon', 'lat']].values
@@ -132,30 +180,28 @@ def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dic
             geometry = create_buffer_polygon(coords[0], config.BUFFER_RADIUS_METERS)
             method = 'buffer'
 
-        elif point_count in [2, 3]:
-            # Few points: use convex hull
-            from scipy.spatial import ConvexHull
-            hull = ConvexHull(coords)
-            hull_points = coords[hull.vertices]
-            geometry = Polygon(hull_points)
-            method = 'convex_hull'
+        elif point_count == 2:
+            # Two points: create buffered line
+            from shapely.geometry import LineString
+            line = LineString(coords)
+            geometry = line.buffer(meters_to_degrees(config.BUFFER_RADIUS_METERS / 2))
+            method = 'buffered_line'
+
+        elif point_count == 3:
+            # Three points: simple triangle
+            geometry = Polygon(coords)
+            method = 'triangle'
 
         else:
-            # Many points: use alpha shape with adaptive alpha
-            alpha = calculate_adaptive_alpha(coords, point_count)
+            # Many points: use Delaunay triangulation with edge filtering
+            edge_threshold = calculate_adaptive_edge_threshold(coords, point_count)
+            geometry = generate_polygon_delaunay(coords, edge_threshold)
 
-            # Try alpha shape
-            try:
-                geometry = alphashape.alphashape(coords, alpha)
-                method = f'alpha_shape(α={alpha:.3f})'
-
-                # If result is not a valid polygon, fall back to convex hull
-                if not isinstance(geometry, (Polygon, MultiPolygon)):
-                    raise ValueError("Alpha shape did not produce polygon")
-
-            except Exception as e:
-                print(f"  ZIP code {zip_code}: Alpha shape failed ({e}), using convex hull")
-                from scipy.spatial import ConvexHull
+            if geometry is not None:
+                method = f'delaunay(e={edge_threshold * 91000:.0f}m)'
+            else:
+                # Fallback to convex hull if Delaunay fails
+                print(f"  ZIP {zip_code}: Delaunay produced no triangles, using convex hull")
                 hull = ConvexHull(coords)
                 hull_points = coords[hull.vertices]
                 geometry = Polygon(hull_points)
@@ -184,42 +230,48 @@ def generate_polygon_for_zip_code(zip_code: str, points_df: pd.DataFrame) -> dic
     return None
 
 
-def apply_color_theorem(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def apply_graph_coloring(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Apply Welsh-Powell greedy graph coloring to ensure adjacent polygons
+    have different colors.
+
+    Args:
+        gdf: GeoDataFrame with polygon geometries
+
+    Returns:
+        GeoDataFrame with color_index column added
+    """
     n = len(gdf)
     print(f"Building adjacency graph for {n} polygons...")
 
-    # 1. Efficient Adjacency Building
+    # Build adjacency using spatial index
     spatial_index = gdf.sindex
     adjacency = {i: set() for i in range(n)}
 
-    # Using a spatial join approach is often faster than manual loops
-    # We find all geometries that intersect/touch
+    # Find all geometries that intersect/touch
     possible_matches = spatial_index.query(gdf.geometry, predicate="intersects")
 
-    # results of query are (array_of_origin_indices, array_of_target_indices)
     for i, j in zip(possible_matches[0], possible_matches[1]):
         if i != j:
             adjacency[i].add(j)
 
-    # 2. Welsh-Powell Greedy Ordering
-    # Sort nodes by degree (number of neighbors) descending
+    # Welsh-Powell: sort nodes by degree (number of neighbors) descending
     nodes = sorted(range(n), key=lambda x: len(adjacency[x]), reverse=True)
 
     colors = {}
 
-    # 3. Open-ended Greedy Coloring
+    # Greedy coloring
     for node in nodes:
-        # Find colors already taken by neighbors
         used_neighbor_colors = {colors[neighbor] for neighbor in adjacency[node] if neighbor in colors}
 
-        # Assign the smallest available non-negative integer color
+        # Assign the smallest available color
         color = 0
         while color in used_neighbor_colors:
             color += 1
 
         colors[node] = color
 
-    # Map colors back to original order and add to GDF
+    # Add colors to GeoDataFrame
     gdf['color_index'] = [colors[i] for i in range(n)]
 
     max_colors = gdf['color_index'].max() + 1
@@ -247,15 +299,15 @@ def main():
     # Check if input file exists
     if not args.input.exists():
         print(f"Error: Input file not found: {args.input}")
-        print(f"Please run 01_prep.py first")
+        print(f"Please run 01_csv2parquet.py first")
         sys.exit(1)
 
     # Load points
     df = load_points(args.input)
 
     # Generate polygons for each ZIP code
-    print(f"\nGenerating polygons for {df['zip_code'].nunique():,} ZIP code...")
-    print(f"Adaptive alpha range: {config.ALPHA_MIN} - {config.ALPHA_MAX}")
+    print(f"\nGenerating polygons for {df['zip_code'].nunique():,} ZIP codes...")
+    print(f"Edge threshold range: {config.EDGE_LENGTH_BASE_METERS}-{config.EDGE_LENGTH_MAX_METERS}m")
     print(f"Buffer radius: {config.BUFFER_RADIUS_METERS}m")
 
     polygons = []
@@ -272,8 +324,8 @@ def main():
     # Create GeoDataFrame
     gdf = gpd.GeoDataFrame(polygons, crs=config.CRS_TARGET)
 
-    # Apply graph coloring (Welsh-Powell greedy algorithm)
-    gdf = apply_color_theorem(gdf)
+    # Apply graph coloring
+    gdf = apply_graph_coloring(gdf)
 
     # Summary statistics
     print("\nSummary:")
@@ -282,6 +334,10 @@ def main():
     print(f"  Average points per ZIP code: {gdf['point_count'].mean():.1f}")
     print(f"  Median area: {gdf['area_km2'].median():.2f} km²")
     print(f"  Total area: {gdf['area_km2'].sum():.0f} km²")
+
+    # Method breakdown
+    method_counts = gdf['method'].apply(lambda x: x.split('(')[0]).value_counts()
+    print(f"  Methods: {method_counts.to_dict()}")
 
     # Export to GeoPackage
     print(f"\nExporting to {args.output}...")

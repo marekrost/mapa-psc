@@ -18,14 +18,14 @@ Cílem architektury je nulový backend a možnost hostování na statickém úlo
 ```text
 /
 ├── data/
-│   ├── raw/                        # Vstupní CSV z RÚIAN (VFR exporty). CP-1250 / WinLatin 2 encoding.
-│   ├── processed/                  # Body v WGS84 (Apache Parquet)
-│   ├── polygons/                   # Surové i sjednocené polygony (GeoPackage)
+│   ├── raw/                        # Vstupní CSV z RÚIAN. CP-1250 / WinLatin 2 encoding.
+│   ├── processed/                  # Body v WGS84
+│   ├── polygons/                   # Surové i sjednocené polygony
 │   └── tiles/                      # Finální vektorové dlaždice {z}/{x}/{y}.pbf
 ├── src/
 │   ├── 01_csv2parquet.py           # ETL: Čištění a transformace souřadnic
-│   ├── 02_parquet2geopkg-poly.py   # ETL: Geometrie: Generování polygonů (Alpha Shapes)
-│   ├── 03_geopkg2geojson-tiles.py  # ETL: Optimalizace: Generování MVT dlaždic (Tippecanoe)
+│   ├── 02_parquet2geopkg-poly.py   # ETL: Geometrie: Generování polygonů
+│   ├── 03_geopkg2geojson-tiles.py  # ETL: Optimalizace: Generování MVT dlaždic
 │   └── config.py
 ├── web/
 │   ├── tiles/                      # MVT dlaždice (zkopírováno z data/tiles)
@@ -64,11 +64,10 @@ Cílem architektury je nulový backend a možnost hostování na statickém úlo
 
 #### Použitý přístup
 
-- Algoritmus: **Concave Hull (Alpha Shapes)**
+- Algoritmus: **Delaunay triangulation + edge filtering**
 - Důvod volby:
-  - lepší zachycení reálného rozsahu zástavby
-  - omezení „území nikoho“ oproti Voronoi
-  - menší nadhodnocení než Convex Hull
+  - zachycení reálného rozsahu zástavby
+  - Umožňuje generovat duté a konkávní tvary
 
 #### Logika zpracování
 
