@@ -169,10 +169,6 @@ def main():
                         help='Output tiles directory path')
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("ETL Step 3: Vector Tile Generation")
-    print("=" * 60)
-
     # Check tippecanoe availability
     if not check_tippecanoe():
         print("\nPlease install tippecanoe first (see README.md)")
@@ -199,12 +195,7 @@ def main():
     # Clean up temporary GeoJSON
     print(f"\nCleaning up temporary file...")
     temp_geojson.unlink()
-
-    print("=" * 60)
-    print("Step 3 completed successfully!")
     print(f"Output: {args.output}")
-    print(f"Ready for web deployment!")
-    print("=" * 60)
 
 
 if __name__ == "__main__":

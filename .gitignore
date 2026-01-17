@@ -27,6 +27,9 @@ env/
 .venv
 
 # Data files (large, generated)
+data/boundary/*
+!data/boundary/
+!data/boundary/.gitkeep
 data/raw/*.csv
 !data/raw/
 !data/raw/.gitkeep

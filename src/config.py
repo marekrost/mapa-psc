@@ -13,11 +13,13 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 POLYGONS_DIR = DATA_DIR / "polygons"
 TILES_DIR = DATA_DIR / "tiles"
+BOUNDARY_DIR = DATA_DIR / "boundary"
 
 # Input/Output files
 INPUT_CSV = RAW_DATA_DIR / "addresses.csv"  # Adjust filename as needed
 POINTS_PARQUET = PROCESSED_DATA_DIR / "addresses.parquet"
 POLYGONS_GPKG = POLYGONS_DIR / "addresses.gpkg"
+BOUNDARY_GEOJSON = BOUNDARY_DIR / "czech_republic.json"
 
 # Coordinate Reference Systems
 CRS_SOURCE = "EPSG:5514"  # S-JTSK

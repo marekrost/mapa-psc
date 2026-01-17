@@ -20,6 +20,7 @@ echo ""
 RAW_DIR="data/raw"
 INPUT_CSV="$RAW_DIR/addresses.csv"
 PROCESSED_PARQUET="data/processed/addresses.parquet"
+BOUNDARY_GEOJSON="data/boundary/czech_republic.json"
 POLYGONS_GPKG="data/polygons/addresses.gpkg"
 TILES_DIR="data/tiles"
 
@@ -76,7 +77,10 @@ echo ""
 echo "=========================================="
 echo "Step 3/5: Polygon Generation"
 echo "=========================================="
-uv run python src/02_parquet2geopkg-poly.py --input "$PROCESSED_PARQUET" --output "$POLYGONS_GPKG"
+uv run python src/02_parquet2geopkg-poly.py \
+    --input "$PROCESSED_PARQUET" \
+    --boundary "$BOUNDARY_GEOJSON" \
+    --output "$POLYGONS_GPKG"
 echo ""
 
 # Step 3: Tile generation

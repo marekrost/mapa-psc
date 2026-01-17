@@ -3,7 +3,7 @@
 ETL Step 2: Polygon Generation using Voronoi Tessellation
 - Load processed points from Parquet
 - Generate Voronoi cells for each address point
-- Clip to convex hull boundary with buffer
+- Clip to country boundary (from GeoJSON file)
 - Dissolve cells by ZIP code
 - Simplify with Douglas-Peucker algorithm
 - Greedy algorithm coloring
@@ -167,9 +167,54 @@ def generate_voronoi_polygons(df: pd.DataFrame, clip_boundary: Polygon) -> gpd.G
     }, crs=config.CRS_TARGET)
 
 
-def create_clip_boundary(df: pd.DataFrame, buffer_meters: float) -> Polygon:
+def load_boundary_from_file(boundary_path: Path) -> Polygon:
+    """
+    Load clipping boundary from a GeoJSON file.
+
+    Args:
+        boundary_path: Path to GeoJSON file containing boundary polygon
+
+    Returns:
+        Polygon boundary, or None if file doesn't exist
+    """
+    if not boundary_path.exists():
+        return None
+
+    print(f"Loading boundary from {boundary_path}...")
+    boundary_gdf = gpd.read_file(boundary_path)
+
+    if len(boundary_gdf) == 0:
+        print("  Warning: Boundary file is empty")
+        return None
+
+    # Get the first geometry (assumes single polygon for country boundary)
+    boundary = boundary_gdf.geometry.iloc[0]
+
+    # Handle MultiPolygon by taking the union
+    if isinstance(boundary, MultiPolygon):
+        boundary = unary_union(boundary)
+
+    if not boundary.is_valid:
+        boundary = boundary.buffer(0)
+
+    original_vertices = len(boundary.exterior.coords)
+
+    # Simplify boundary for faster intersection operations (~50m tolerance)
+    simplify_tolerance = meters_to_degrees(50)
+    boundary = boundary.simplify(simplify_tolerance, preserve_topology=True)
+
+    if not boundary.is_valid:
+        boundary = boundary.buffer(0)
+
+    simplified_vertices = len(boundary.exterior.coords)
+    print(f"  Loaded boundary: {original_vertices:,} -> {simplified_vertices:,} vertices (simplified ~50m)")
+    return boundary
+
+
+def create_clip_boundary_from_hull(df: pd.DataFrame, buffer_meters: float) -> Polygon:
     """
     Create a clipping boundary from the convex hull of all points with a buffer.
+    Used as fallback when no boundary file is available.
 
     Args:
         df: DataFrame with lon, lat columns
@@ -306,11 +351,9 @@ def main():
                         help='Input Parquet file path')
     parser.add_argument('--output', type=Path, default=config.POLYGONS_GPKG,
                         help='Output GeoPackage file path')
+    parser.add_argument('--boundary', type=Path, default=config.BOUNDARY_GEOJSON,
+                        help='Boundary GeoJSON file path')
     args = parser.parse_args()
-
-    print("=" * 60)
-    print("ETL Step 2: Polygon Generation (Voronoi Tessellation)")
-    print("=" * 60)
 
     # Check if input file exists
     if not args.input.exists():
@@ -321,9 +364,12 @@ def main():
     # Load points
     df = load_points(args.input)
 
-    # Create clipping boundary (convex hull + buffer)
-    print(f"\nCreating clip boundary (convex hull + {config.VORONOI_CLIP_BUFFER_METERS}m buffer)...")
-    clip_boundary = create_clip_boundary(df, config.VORONOI_CLIP_BUFFER_METERS)
+    # Load clipping boundary from file, fallback to convex hull
+    print(f"\nLoading clip boundary...")
+    clip_boundary = load_boundary_from_file(args.boundary)
+    if clip_boundary is None:
+        print(f"  Boundary file not found, falling back to convex hull + {config.VORONOI_CLIP_BUFFER_METERS}m buffer...")
+        clip_boundary = create_clip_boundary_from_hull(df, config.VORONOI_CLIP_BUFFER_METERS)
 
     # Generate Voronoi cells
     print("Generating Voronoi cells for all points...")
@@ -365,11 +411,7 @@ def main():
 
     file_size_mb = args.output.stat().st_size / 1024 / 1024
     print(f"Saved {len(result_gdf):,} polygons ({file_size_mb:.2f} MB)")
-
-    print("=" * 60)
-    print("Step 2 completed successfully!")
     print(f"Output: {args.output}")
-    print("=" * 60)
 
 
 if __name__ == "__main__":

@@ -254,10 +254,6 @@ def main():
                         help='Output Parquet file path')
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("ETL Step 1: Data Preparation")
-    print("=" * 60)
-
     # Check if input file exists
     if not args.input.exists():
         print(f"Error: Input file not found: {args.input}")
@@ -275,11 +271,7 @@ def main():
 
     # Export to Parquet
     export_to_parquet(df, args.output)
-
-    print("=" * 60)
-    print("Step 1 completed successfully!")
     print(f"Output: {args.output}")
-    print("=" * 60)
 
 
 if __name__ == "__main__":

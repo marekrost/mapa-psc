@@ -12,6 +12,7 @@ echo ""
 # Define file paths
 INPUT_CSV="data/raw/sample.csv"
 PROCESSED_PARQUET="data/processed/sample.parquet"
+BOUNDARY_GEOJSON="data/boundary/czech_republic.json"
 POLYGONS_GPKG="data/polygons/sample.gpkg"
 TILES_DIR="data/tiles"
 
@@ -38,7 +39,10 @@ echo ""
 echo "=========================================="
 echo "Step 2/4: Polygon Generation"
 echo "=========================================="
-uv run python src/02_parquet2geopkg-poly.py --input "$PROCESSED_PARQUET" --output "$POLYGONS_GPKG"
+uv run python src/02_parquet2geopkg-poly.py \
+    --input "$PROCESSED_PARQUET" \
+    --boundary "$BOUNDARY_GEOJSON" \
+    --output "$POLYGONS_GPKG"
 echo ""
 
 # Step 3: Tile generation
