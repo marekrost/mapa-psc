@@ -29,12 +29,10 @@ Smyslem projektu je poskytnout online mapu příslušnosti k PSČ. PSČ není of
 
 ### 1. Instalace závislostí
 
+Projekt používá správce závislostí **uv**. Všechny potřebné závislost se stáhnout při prvním spuštění pipeline.
+
 ```bash
-PYTHON_VERSION=$(cat .python-version)
-pyenv local $PYTHON_VERSION
-python -m venv .venv
-source .venv/bin/activate
-pip install uv
+# Pro stažení závislostní ručně stačí spustit:
 uv sync
 ```
 
@@ -57,7 +55,7 @@ Zdrojová data pocházejí z [RÚIAN](https://vdp.cuzk.gov.cz/) (Registr územn�
 ```bash
 # Jednoduchý HTTP server pro testování
 cd web
-python -m http.server 8000
+uv run python -m http.server 8000
 
 # Otevřete v prohlížeči:
 # http://localhost:8000
