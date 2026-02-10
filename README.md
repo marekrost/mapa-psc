@@ -1,8 +1,8 @@
 # Interaktivní mapa PSČ ČR
 
-Interaktivní mapa poštovních směrovacích čísel České republiky s hranicemi odvozenými z RÚIAN adresních bodů.
+[![Live Demo](https://img.shields.io/badge/Live_Demo-mapa--psc.marekrost.cz-blue?style=for-the-badge)](https://mapa-psc.marekrost.cz/) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 
-**Živá verze [ZDE](https://mapa-psc.marekrost.cz/)**.
+Interaktivní mapa poštovních směrovacích čísel České republiky s hranicemi odvozenými z RÚIAN adresních bodů. Open-source data a algoritmus pro generování hranic PSČ v ČR. Exporty do GeoJSON a Vector Tiles.
 
 ## O projektu
 

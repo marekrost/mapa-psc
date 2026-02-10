@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa PSČ ČR - Open Source</title>
+    <title>Interaktivní mapa PSČ ČR (2026) | Hranice a zóny online</title>
+    <meta name="description" content="Interaktivní mapa poštovních směrovacích čísel České republiky s hranicemi odvozenými z RÚIAN adresních bodů. Open-source, vektorové dlaždice, Voronoi tessellation.">
+    <link rel="canonical" href="https://mapa-psc.marekrost.cz/">
+    <meta property="og:title" content="Interaktivní mapa PSČ ČR (2026) | Hranice a zóny online">
+    <meta property="og:description" content="Online mapa poštovních směrovacích čísel ČR s odvozenými hranicemi z RÚIAN dat. Vektorové dlaždice, open-source.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mapa-psc.marekrost.cz/">
 
     <!-- MapLibre GL JS -->
     <link href="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css" rel="stylesheet">
@@ -41,7 +47,7 @@
         }
 
         .info-panel h1 {
-            font-size: 18px;
+            font-size: 16px;
             margin-bottom: 8px;
             color: #333;
         }
@@ -153,7 +159,7 @@
     <div id="map"></div>
 
     <div class="info-panel">
-        <h1>Mapa PSČ ČR</h1>
+        <h1>Mapa poštovních směrovacích čísel České republiky</h1>
         <p>
             Interaktivní mapa poštovních směrovacích čísel České republiky.
             Klikněte nebo přejeďte myší přes oblast pro zobrazení informací.
@@ -182,6 +188,13 @@
         Data © <a href="https://www.cuzk.cz/" target="_blank" rel="noopener">RÚIAN</a> |
         Mapa © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
     </div>
+
+    <noscript>
+        <div style="padding: 20px; max-width: 600px; margin: 60px auto; font-family: sans-serif;">
+            <h2>Interaktivní mapa PSČ ČR</h2>
+            <p>Tato mapa pokrývá všechna PSČ České republiky od 100 00 (Praha) po 798 62 (Morava). Hranice PSČ jsou odvozeny z adresních bodů RÚIAN pomocí Voronoi tessellation. Pro zobrazení interaktivní mapy je nutné povolit JavaScript.</p>
+        </div>
+    </noscript>
 
     <script src="app.js"></script>
 </body>
